@@ -172,7 +172,7 @@ impl ShmDefinition {
 #[derive(Debug)]
 pub struct ShmMap {
     /// Definition of the shared memory object that is mapped
-    definition: ShmDefinition,
+    pub definition: ShmDefinition,
     /// The pointer to the start of the memory mapped object
     head: *const u8,
 }
@@ -184,7 +184,7 @@ pub struct ShmMap {
 #[derive(Debug)]
 pub struct OwnedShmMap {
     /// Definition of the shared memory object that is mapped
-    definition: ShmDefinition,
+    pub definition: ShmDefinition,
     /// The pointer to the start of the memory mapped object
     head: *const u8,
 }
