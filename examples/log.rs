@@ -10,37 +10,6 @@ use rshm::{
 
 /// A LogConsumer reads records from the log as they become available,
 /// as signalled by a LogProducer through a condvar.
-/// ```
-/// use rand::Rng;
-/// use rshm::shm::ShmDefinition;
-///
-/// use crate::{LogConsumer, LogProducer};
-///
-/// #[test]
-/// fn log_consumer_reads_record_added_by_log_producer() {
-///     let definition_producer = ShmDefinition {
-///     path: "test".to_string(),
-///         size: 1024,
-///     };
-///     let producer_shm = definition_producer.create().unwrap();
-///     let mut producer = LogProducer::new(producer_shm);
-///     // Wait so that the consumer has time to start before we drop the shared memory.
-///     let consumer = std::thread::spawn(|| {
-///         // Wait so that the producer has time to start before e read the shared memory.
-///         let definition_consumer = ShmDefinition {
-///             path: "test".to_string(),
-///             size: 1024,
-///        };
-///         let consumer_shm = definition_consumer.open().unwrap();
-///         let mut consumer = LogConsumer::new(consumer_shm);
-///         consumer.next().unwrap()
-///     });
-///     let record = rand::thread_rng().gen::<u64>();
-///     producer.insert(record).unwrap();
-///     let consumer_read = consumer.join().unwrap();
-///     assert_eq!(record, consumer_read);
-/// }
-/// ```
 pub struct LogConsumer<E: Copy> {
     _map: ShmMap,
     condvar: *const Condvar,
@@ -81,11 +50,13 @@ impl<E: Copy> LogConsumer<E> {
     /// new records are available (the current sequence in shared memory is still lower than the next
     /// sequence we expect to read)
     pub fn next(&mut self) -> Option<E> {
-        let current_sequence = unsafe { self.sequence_number.read_volatile() };
+        let mut current_sequence = unsafe { self.sequence_number.read_volatile() };
         if current_sequence < self.next_sequence {
             match unsafe { (*self.condvar).wait() } {
                 Err(_) => return None,
-                _ => {}
+                _ => {
+                    current_sequence = unsafe { self.sequence_number.read_volatile() };
+                }
             }
         }
         if current_sequence >= self.next_sequence {
@@ -165,4 +136,33 @@ pub enum ErrorCode {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use rand::Rng;
+    use rshm::shm::ShmDefinition;
+
+    use crate::{LogConsumer, LogProducer};
+
+    #[test]
+    fn log_consumer_reads_record_added_by_log_producer() {
+        let definition_producer = ShmDefinition {
+            path: "test".to_string(),
+            size: 1024,
+        };
+        let producer_shm = definition_producer.create().unwrap();
+        let mut producer = LogProducer::new(producer_shm);
+        // Wait so that the consumer has time to start before we drop the shared memory.
+        let consumer = std::thread::spawn(|| {
+            let definition_consumer = ShmDefinition {
+                path: "test".to_string(),
+                size: 1024,
+            };
+            let consumer_shm = definition_consumer.open().unwrap();
+            let mut consumer = LogConsumer::new(consumer_shm);
+            consumer.next().unwrap()
+        });
+        let record = rand::thread_rng().gen::<u64>();
+        producer.insert(record).unwrap();
+        let consumer_read = consumer.join().unwrap();
+        assert_eq!(record, consumer_read);
+    }
+}
