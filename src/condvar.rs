@@ -42,18 +42,15 @@ impl Condvar {
     ///
     ///  let condvar = Arc::new(Condvar::new());
     ///  let condvar_clone = condvar.clone();
-    ///  let waiting_thread = thread::spawn(move || {
-    ///     condvar.wait().unwrap();
-    ///     true
-    ///  });
     ///  let waking_thread = thread::spawn(move || {
+    ///     std::thread::sleep(std::time::Duration::from_secs(1));
     ///     let mut result = 0;
     ///     while result == 0 {
     ///      result = condvar_clone.notify_all().unwrap();
     ///     }
     ///     result
     ///  });
-    ///  assert!(waiting_thread.join().unwrap());
+    ///     condvar.wait().unwrap();
     ///  assert_eq!(1, waking_thread.join().unwrap());
     /// ```
     ///
@@ -151,18 +148,15 @@ mod tests {
             value: AtomicI32::new(0),
         });
         let futex_clone = futex.clone();
-        let waiting_thread = thread::spawn(move || {
-            unsafe { futex.wait().unwrap() };
-            true
-        });
         let waking_thread = thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(1));
             let mut result = 0;
             while result == 0 {
                 result = unsafe { futex_clone.wake(1).unwrap() };
             }
             result
         });
-        assert!(waiting_thread.join().unwrap());
+        unsafe { futex.wait().unwrap() };
         assert_eq!(1, waking_thread.join().unwrap());
     }
 }
