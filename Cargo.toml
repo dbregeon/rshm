@@ -23,3 +23,8 @@ test = true
 name = "io"
 crate-type = ["staticlib"]
 test = true
+
+[[example]]
+name = "dictionary"
+crate-type = ["staticlib"]
+test = true
