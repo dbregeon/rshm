@@ -5,6 +5,9 @@ use std::{
 
 use rshm::shm::{OwnedShmMap, ShmMap};
 
+/// An ShmReader reads bytes from a shared memory buffer.
+/// There is no notification or wake-up mechanism built-in. This would have to be built
+/// separately. See the [LogConsumer] and [LogProducer] examples for a possible implementation.
 pub struct ShmReader {
     _shm: ShmMap,
     written_bytes_ptr: *const u8,
@@ -12,19 +15,17 @@ pub struct ShmReader {
     read: usize,
 }
 
-pub enum ErrorCode {}
-
 impl ShmReader {
-    pub fn new(shm: ShmMap) -> Result<Self, ErrorCode> {
+    pub fn new(shm: ShmMap) -> Self {
         // We keep the number of written bytes of the beginning
         let written_bytes_ptr = shm.head();
         let last_read_ptr = unsafe { written_bytes_ptr.add(1) };
-        Ok(Self {
+        Self {
             _shm: shm,
             written_bytes_ptr: written_bytes_ptr,
             last_read_ptr: last_read_ptr,
             read: 0,
-        })
+        }
     }
 }
 
@@ -54,19 +55,19 @@ pub struct ShmWriter {
 }
 
 impl ShmWriter {
-    pub fn new(shm: OwnedShmMap) -> Result<Self, ErrorCode> {
+    pub fn new(shm: OwnedShmMap) -> Self {
         let available = shm.definition.size - size_of::<u8>();
 
         // We keep the number of written bytes of the beginning
         let written_bytes_ptr = shm.head() as *mut u8;
         let end_ptr = unsafe { written_bytes_ptr.add(1) } as *mut u8;
         unsafe { *written_bytes_ptr = 0 };
-        Ok(Self {
+        Self {
             _shm: shm,
             written_bytes_ptr,
             end_ptr,
             available,
-        })
+        }
     }
 }
 
@@ -88,5 +89,40 @@ impl Write for ShmWriter {
 
     fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+
+    use crate::{ShmReader, ShmWriter};
+    use rshm::shm::ShmDefinition;
+
+    #[test]
+    fn reader_reads_what_writer_wrote() {
+        let writer_definition = ShmDefinition {
+            path: "test_writer".to_string(),
+            size: 10,
+        };
+        let writer_shm = writer_definition.create().unwrap();
+        let mut writer = ShmWriter::new(writer_shm);
+
+        writer.write("test1".as_bytes()).unwrap();
+        writer.flush().unwrap();
+
+        let reader_definition = ShmDefinition {
+            path: "test_writer".to_string(),
+            size: 10,
+        };
+        let reader_shm = reader_definition.open().unwrap();
+        let mut reader = ShmReader::new(reader_shm);
+        let mut reader_buffer = vec![0 as u8; 1024];
+        let count = reader.read(&mut reader_buffer).unwrap();
+
+        assert_eq!(
+            format!("{}", std::str::from_utf8(&reader_buffer[0..count]).unwrap()),
+            "test1"
+        )
     }
 }
