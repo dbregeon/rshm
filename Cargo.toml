@@ -2,6 +2,11 @@
 name = "rshm"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-3.0-or-later"
+description = "A library to use Linux's shm shared memory facilities in Rust"
+repository = "https://github.com/dbregeon/rshm"
+keywords = ["shm", "linux", "condvar"]
+categories = ["Memory management"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
