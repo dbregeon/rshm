@@ -56,7 +56,7 @@ pub struct ShmWriter {
 
 impl ShmWriter {
     pub fn new(shm: OwnedShmMap) -> Self {
-        let available = shm.definition.size - size_of::<u8>();
+        let available = shm.definition.size.get() - size_of::<u8>();
 
         // We keep the number of written bytes of the beginning
         let written_bytes_ptr = shm.head() as *mut u8;
@@ -94,7 +94,10 @@ impl Write for ShmWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
+    use std::{
+        io::{Read, Write},
+        num::NonZero,
+    };
 
     use crate::{ShmReader, ShmWriter};
     use rshm::shm::ShmDefinition;
@@ -103,7 +106,7 @@ mod tests {
     fn reader_reads_what_writer_wrote() {
         let writer_definition = ShmDefinition {
             path: "test_writer".to_string(),
-            size: 10,
+            size: NonZero::new(10).expect("10 is not 0"),
         };
         let writer_shm = writer_definition.create().unwrap();
         let mut writer = ShmWriter::new(writer_shm);
@@ -113,7 +116,7 @@ mod tests {
 
         let reader_definition = ShmDefinition {
             path: "test_writer".to_string(),
-            size: 10,
+            size: NonZero::new(10).expect("10 is not 0"),
         };
         let reader_shm = reader_definition.open().unwrap();
         let mut reader = ShmReader::new(reader_shm);

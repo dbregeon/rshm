@@ -6,6 +6,7 @@ use core::ops::Add;
 
 use std::{
     mem::size_of,
+    num::NonZero,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -49,7 +50,7 @@ fn main() {
 fn run_light_load(warmup_count: usize, count: usize, beat: std::time::Duration) {
     let log_definition = ShmDefinition {
         path: "test_log".to_string(),
-        size: size_of::<LigthRecord>() * (warmup_count + count),
+        size: NonZero::new(size_of::<LigthRecord>() * (warmup_count + count)).unwrap(),
     };
     let log_shm = log_definition.create().unwrap();
     let mut log: LogProducer<LigthRecord> = LogProducer::new(log_shm);

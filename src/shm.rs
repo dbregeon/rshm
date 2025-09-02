@@ -1,6 +1,7 @@
-use std::os::unix::io::RawFd;
+use std::num::NonZero;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::Path;
-use std::ptr::null_mut;
+use std::ptr::NonNull;
 
 use nix::errno::Errno;
 use nix::fcntl::OFlag;
@@ -19,7 +20,7 @@ pub struct ShmDefinition {
     /// (typially /dev/shm/..., /dev/hugepages/...)
     pub path: String,
     /// The size of the memory to allocate for this shared memory block.
-    pub size: usize,
+    pub size: NonZero<usize>,
 }
 
 ///
@@ -73,7 +74,7 @@ impl ShmDefinition {
     ///
     /// let definition = ShmDefinition {
     ///     path: "test1".to_string(),
-    ///     size: 1024,
+    ///     size: std::num::NonZero::new(1024).unwrap(),
     /// };
     /// let _shm = definition.create().unwrap();
     /// let metadata = std::fs::metadata("/dev/shm/test1").unwrap();
@@ -91,11 +92,11 @@ impl ShmDefinition {
         .map_err(map_open_error)
         .and_then(|fd| {
             (&self)
-                .create_mmap(fd, ProtFlags::PROT_READ | ProtFlags::PROT_WRITE)
+                .create_mmap(&fd, ProtFlags::PROT_READ | ProtFlags::PROT_WRITE)
                 .and_then(|p| {
                     Ok(OwnedShmMap {
                         definition: self,
-                        head: p as *const u8,
+                        head: p,
                     })
                 })
         })
@@ -110,11 +111,11 @@ impl ShmDefinition {
     ///
     /// let definition_owned = ShmDefinition {
     ///     path: "example".to_string(),
-    ///     size: 1024,
+    ///     size: std::num::NonZero::new(1024).unwrap(),
     /// };
     /// let definition = ShmDefinition {
     ///     path: "example".to_string(),
-    ///     size: 1024,
+    ///     size: std::num::NonZero::new(1024).unwrap(),
     /// };
     /// let owned_shm = definition_owned.create().unwrap();
     /// let shm = definition.open().unwrap();
@@ -131,33 +132,36 @@ impl ShmDefinition {
         .map_err(map_open_error)
         .and_then(|fd| {
             (&self)
-                .create_mmap(fd, ProtFlags::PROT_READ | ProtFlags::PROT_WRITE)
+                .create_mmap(&fd, ProtFlags::PROT_READ | ProtFlags::PROT_WRITE)
                 .and_then(|p| {
                     Ok(ShmMap {
                         definition: self,
-                        head: p as *const u8,
+                        head: p,
                     })
                 })
         })
     }
 
-    fn create_mmap(&self, fd: RawFd, flags: ProtFlags) -> Result<*mut c_void, ErrorCode> {
-        ftruncate(fd, self.size as off_t)
+    fn create_mmap<Fd: std::os::fd::AsFd>(
+        &self,
+        fd: &Fd,
+        flags: ProtFlags,
+    ) -> Result<NonNull<c_void>, ErrorCode> {
+        ftruncate(&fd, self.size.get() as off_t)
             .map_err(map_truncate_error)
             .and_then(|_| unsafe {
                 mmap(
-                    null_mut(),           // Desired addr
+                    None,                 // Desired addr
                     self.size,            // size of mapping
                     flags,                // Permissions on pages
                     MapFlags::MAP_SHARED, // What kind of mapping
-                    fd,                   // fd
+                    &fd,                  // fd
                     0,                    // Offset into fd
                 )
                 .map_err(map_mmap_error)
             })
-            .and_then(|p| close(fd).map_err(map_close_error).and_then(|_| Ok(p)))
             .or_else(|err| {
-                let _close_result = close(fd);
+                let _close_result = close(fd.as_fd().as_raw_fd());
                 let _removal_result =
                     std::fs::remove_file(Path::new(format!("/dev/shm/{}", self.path).as_str()));
                 Err(err)
@@ -174,7 +178,7 @@ pub struct ShmMap {
     /// Definition of the shared memory object that is mapped
     pub definition: ShmDefinition,
     /// The pointer to the start of the memory mapped object
-    head: *const u8,
+    head: NonNull<c_void>,
 }
 
 ///
@@ -186,12 +190,12 @@ pub struct OwnedShmMap {
     /// Definition of the shared memory object that is mapped
     pub definition: ShmDefinition,
     /// The pointer to the start of the memory mapped object
-    head: *const u8,
+    head: NonNull<c_void>,
 }
 
 impl Drop for OwnedShmMap {
     fn drop(&mut self) {
-        unsafe { munmap(self.head as *mut _, self.definition.size) }
+        unsafe { munmap(self.head, self.definition.size.get()) }
             .map_err(map_munmap_error)
             .and_then(|_| shm_unlink(self.definition.path.as_str()).map_err(map_unlink_error))
             .unwrap();
@@ -201,14 +205,14 @@ impl Drop for OwnedShmMap {
 impl OwnedShmMap {
     /// returns a pointer to the start of the mapped memory object
     pub fn head(&self) -> *const u8 {
-        self.head
+        self.head.as_ptr() as *const u8
     }
 }
 
 impl Drop for ShmMap {
     fn drop(&mut self) {
         unsafe {
-            munmap(self.head as *mut _, self.definition.size)
+            munmap(self.head, self.definition.size.get())
                 .map_err(map_munmap_error)
                 .unwrap()
         }
@@ -218,7 +222,7 @@ impl Drop for ShmMap {
 impl ShmMap {
     /// returns a pointer to the start of the mapped memory object
     pub fn head(&self) -> *const u8 {
-        self.head
+        self.head.as_ptr() as *const u8
     }
 }
 
@@ -286,7 +290,7 @@ mod tests {
     fn create_a_shared_memory_object_with_the_correct_size() {
         let definition = ShmDefinition {
             path: "test1".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let _shm = definition.create().unwrap();
         let metadata = std::fs::metadata("/dev/shm/test1").unwrap();
@@ -299,7 +303,7 @@ mod tests {
     fn drop_owned_shm_removes_the_shared_memory_object() {
         let definition = ShmDefinition {
             path: "test2".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let shm = definition.create().unwrap();
         drop(shm);
@@ -313,11 +317,11 @@ mod tests {
     fn open_maps_an_existing_shared_memory_object() {
         let definition_owned = ShmDefinition {
             path: "test3".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let definition = ShmDefinition {
             path: "test3".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let owned_shm = definition_owned.create().unwrap();
         let shm = definition.open().unwrap();
@@ -332,11 +336,11 @@ mod tests {
     fn drop_shm_does_not_remove_the_shared_memory_object() {
         let definition_owned = ShmDefinition {
             path: "test4".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let definition = ShmDefinition {
             path: "test4".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let _owned_shm = definition_owned.create().unwrap();
         let shm = definition.open().unwrap();
@@ -351,7 +355,7 @@ mod tests {
     fn create_reports_an_error_when_path_is_invalid() {
         let definition = ShmDefinition {
             path: "/dev/shm/test".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let error = definition.create().unwrap_err();
 
@@ -362,11 +366,11 @@ mod tests {
     fn create_reports_an_error_when_path_already_exists() {
         let definition1 = ShmDefinition {
             path: "test6".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let definition2 = ShmDefinition {
             path: "test6".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let _shm = definition1.create().unwrap();
         let error = definition2.create().unwrap_err();
@@ -378,21 +382,10 @@ mod tests {
     fn open_reports_an_error_when_path_does_not_exists() {
         let definition = ShmDefinition {
             path: "test7".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let error = definition.open().unwrap_err();
 
         assert_eq!(ErrorCode::ShmPathDoesNotExist, error);
-    }
-
-    #[test]
-    fn open_reports_an_error_when_size_is_invalid() {
-        let definition = ShmDefinition {
-            path: "test8".to_string(),
-            size: 0,
-        };
-        let error = definition.create().unwrap_err();
-
-        assert_eq!(ErrorCode::InvalidMMapArguments, error);
     }
 }

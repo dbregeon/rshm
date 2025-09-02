@@ -71,7 +71,7 @@ impl<K: Eq + Hash, R: Record<K>> ShmDictionaryOwner<K, R> {
             _map: map,
             written_records_ptr: written_records_ptr,
             end_ptr: end_ptr,
-            available: (size - size_of::<u8>()) / size_of::<R>(),
+            available: (size.get() - size_of::<u8>()) / size_of::<R>(),
             index: HashMap::new(),
         }
     }
@@ -115,6 +115,8 @@ pub trait Record<K>: Copy {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use rshm::shm::ShmDefinition;
 
     use crate::{Record, ShmDictionaryClient, ShmDictionaryOwner};
@@ -135,7 +137,7 @@ mod tests {
     fn store_insertion_is_read_by_the_client() {
         let owner_definition = ShmDefinition {
             path: "test_store".to_string(),
-            size: 1024,
+            size: NonZero::new(1024).expect("1024 is not 0"),
         };
         let owner_shared_memory = owner_definition.create().unwrap();
         let mut owner_store: ShmDictionaryOwner<i32, TestRecord> =
@@ -143,7 +145,7 @@ mod tests {
 
         let client_definition = ShmDefinition {
             path: "test_store".to_string(),
-            size: 1024,
+            size: NonZero::new(1024).expect("1024 is not 0"),
         };
         let client_shared_memory = client_definition.open().unwrap();
         let mut client_store: ShmDictionaryClient<i32, TestRecord> =

@@ -6,6 +6,7 @@ use self::log::LogConsumer;
 
 use std::{
     mem::size_of,
+    num::NonZero,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -41,7 +42,7 @@ fn main() {
 fn test_light_load(warmup_count: usize, count: usize) {
     let definition = ShmDefinition {
         path: "test_log".to_string(),
-        size: size_of::<LigthRecord>() * (warmup_count + count),
+        size: NonZero::new(size_of::<LigthRecord>() * (warmup_count + count)).unwrap(),
     };
     let log_shm = definition.open().unwrap();
     let mut log: LogConsumer<LigthRecord> = LogConsumer::new(log_shm);

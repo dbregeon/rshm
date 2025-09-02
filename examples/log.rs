@@ -27,11 +27,11 @@ impl<E: Copy> LogConsumer<E> {
     pub fn new(map: ShmMap) -> Self {
         let condvar_ptr = map.head() as *const Condvar;
         // We keep the number of written bytes of the beginning
-        let sequence_number = unsafe { (condvar_ptr.add(1)) as *const u64 };
-        let size_of_e = size_of::<E>();
-        let alignment_offset = (size_of::<Condvar>() + size_of::<u64>()) / size_of_e + 1;
+        let sequence_number =
+            unsafe { (condvar_ptr.add(condvar_ptr.align_offset(size_of::<u64>()))) as *mut u64 };
         // Ensure Alignment
-        let end_ptr = unsafe { (map.head() as *const E).add(alignment_offset) };
+        let alignment_offset = sequence_number.align_offset(size_of::<E>());
+        let end_ptr = unsafe { sequence_number.add(alignment_offset.max(1)) as *mut E };
         Self {
             _map: map,
             condvar: condvar_ptr,
@@ -91,18 +91,18 @@ impl<E: Copy> LogProducer<E> {
     pub fn new(map: OwnedShmMap) -> Self {
         let condvar_ptr = map.head() as *const Condvar;
         // We keep the number of written bytes of the beginning
-        let sequence_number = unsafe { (condvar_ptr.add(1)) as *mut u64 };
-        let size_of_e = size_of::<E>();
-        let alignment_offset = (size_of::<Condvar>() + size_of::<u64>()) / size_of_e + 1;
+        let sequence_number =
+            unsafe { (condvar_ptr.add(condvar_ptr.align_offset(size_of::<u64>()))) as *mut u64 };
         // Ensure Alignment
-        let end_ptr = unsafe { (map.head() as *mut E).add(alignment_offset) };
+        let alignment_offset = sequence_number.align_offset(size_of::<E>());
+        let end_ptr = unsafe { sequence_number.add(alignment_offset.max(1)) as *mut E };
         let map_size = map.definition.size;
         Self {
             _map: map,
             condvar: condvar_ptr,
             sequence_number,
             end_ptr,
-            available: map_size / size_of::<E>() - alignment_offset,
+            available: map_size.get() / size_of::<E>() - alignment_offset,
         }
     }
 
@@ -140,13 +140,13 @@ mod tests {
     use rand::Rng;
     use rshm::shm::ShmDefinition;
 
-    use crate::{LogConsumer, LogProducer};
+    use super::{LogConsumer, LogProducer};
 
     #[test]
     fn log_consumer_reads_record_added_by_log_producer() {
         let definition_producer = ShmDefinition {
             path: "test".to_string(),
-            size: 1024,
+            size: std::num::NonZero::new(1024).expect("1024 is not zero"),
         };
         let producer_shm = definition_producer.create().unwrap();
         let mut producer = LogProducer::new(producer_shm);
@@ -154,13 +154,13 @@ mod tests {
         let consumer = std::thread::spawn(|| {
             let definition_consumer = ShmDefinition {
                 path: "test".to_string(),
-                size: 1024,
+                size: std::num::NonZero::new(1024).expect("1024 is not zero"),
             };
             let consumer_shm = definition_consumer.open().unwrap();
             let mut consumer = LogConsumer::new(consumer_shm);
             consumer.next().unwrap()
         });
-        let record = rand::thread_rng().gen::<u64>();
+        let record = rand::rng().random::<u64>();
         producer.insert(record).unwrap();
         let consumer_read = consumer.join().unwrap();
         assert_eq!(record, consumer_read);
