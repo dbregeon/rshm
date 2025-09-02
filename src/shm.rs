@@ -1,5 +1,5 @@
 use std::num::NonZero;
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::ptr::NonNull;
 
@@ -235,14 +235,6 @@ fn map_unlink_error(errno: Errno) -> ErrorCode {
 
 fn map_munmap_error(errno: Errno) -> ErrorCode {
     match errno {
-        other => ErrorCode::Unknown(other),
-    }
-}
-
-fn map_close_error(errno: Errno) -> ErrorCode {
-    match errno {
-        Errno::EINTR => ErrorCode::CloseInterrupted,
-        Errno::EIO => ErrorCode::CloseIOError,
         other => ErrorCode::Unknown(other),
     }
 }
